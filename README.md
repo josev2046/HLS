@@ -1,5 +1,7 @@
 ## OVP HLS Player: A Cookie-Minimal Approach
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15758732.svg)](https://doi.org/10.5281/zenodo.15758732)
+
 This repository outlines a high-level approach for delivering Video-on-Demand (VoD) content in a web browser, prioritising minimal cookie imposition on the client-side. The solution leverages an Online Video Platform (OVP) as a content source and integrates an open-source HLS (HTTP Live Streaming) player, namely HLS.js, for robust playback capabilities.
 
 ## Challenge Overview: Minimising Client-Side Cookies
