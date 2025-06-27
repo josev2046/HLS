@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vimeo HLS Player (Dynamic URL Fetch)</title>
+    <!-- Tailwind CSS CDN for basic styling. This is kept as it's a CDN import, not inline CSS. -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Inter font from Google Fonts. This is kept as it's a CDN import, not inline CSS. -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- HLS.js library for HLS playback. This is kept as it's a CDN import. -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <!--
+        Inline CSS styling has been removed as per your request.
+        The layout and basic element appearance will now rely solely on default browser styles and Tailwind CSS classes applied directly to elements.
+    -->
+    <style>
+        /*
+            All custom CSS styling has been removed from this block.
+            The display and layout are now dependent on default browser behavior and Tailwind CSS classes.
+            If specific styling is needed, it should be applied directly as Tailwind classes on HTML elements.
+            The spinner animation CSS is retained as it's essential for the loading indicator functionality.
+        */
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #4f46e5;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 0.5rem;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<!--
+    The <body> tag now uses Tailwind CSS classes for layout and styling
+    to maintain a similar visual presentation after removing custom CSS.
+-->
+<body class="font-inter bg-gray-100 flex items-center justify-center min-h-screen p-4 box-border">
+    <!-- Main container for the video player and controls -->
+    <div class="bg-white rounded-xl shadow-lg p-6 max-w-4xl w-full flex flex-col space-y-4">
+        <!-- Main heading for the application -->
+        <h1 class="text-2xl font-bold text-gray-800">Vimeo HLS Playback Demo</h1>
+        <!-- Descriptive text for the user -->
+        <p class="text-gray-600">Enter a Vimeo Video ID and your API Token below to dynamically fetch and play its HLS stream.</p>
+
+        <!-- Input group for Vimeo Video ID -->
+        <div class="flex flex-col space-y-2">
+            <label for="vimeoVideoId" class="font-semibold text-gray-700">Vimeo Video ID:</label>
+            <input type="text" id="vimeoVideoId" placeholder="e.g., 123456789" class="p-3 border border-gray-300 rounded-lg text-gray-800 bg-gray-50 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">
+        </div>
+
+        <!-- Input group for Vimeo API Token -->
+        <div class="flex flex-col space-y-2">
+            <label for="vimeoApiToken" class="font-semibold text-gray-700">Vimeo API Token:</label>
+            <input type="password" id="vimeoApiToken" placeholder="Your Vimeo API Access Token" class="p-3 border border-gray-300 rounded-lg text-gray-800 bg-gray-50 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">
+        </div>
+
+        <!-- Video player element -->
+        <video id="videoPlayer" controls class="w-full h-auto max-h-screen-70 rounded-md bg-black"></video>
+
+        <!-- Message box for displaying errors or success messages -->
+        <div id="messageBox" class="hidden p-3 rounded-lg text-sm"></div>
+
+        <!-- Button to trigger video fetch and playback -->
+        <button id="fetchAndPlayButton" class="bg-indigo-600 text-white p-3 rounded-lg font-semibold text-center cursor-pointer transition-colors duration-300 shadow-md hover:bg-indigo-700">
+            <!-- Spinner element, hidden by default, shown during loading -->
+            <span id="buttonSpinner" class="spinner hidden"></span>
+            <!-- Text displayed on the button -->
+            <span id="buttonText">Fetch & Play Video</span>
+        </button>
+
+        <!-- Informational notes for the user -->
+        <div class="mt-4 text-gray-500 text-sm">
+            <p class="mb-2"><strong>Security Note:</strong> For production applications, it is highly recommended to fetch the HLS URL via a secure backend server to avoid exposing your Vimeo API token client-side.</p>
+            <p>If you encounter "bufferAppendError", it usually means the HLS stream URL has expired, is restricted, or there's a CORS issue with Vimeo's content delivery network. A backend proxy is often required to resolve this for reliable Vimeo HLS playback.</p>
+        </div>
+    </div>
+
+    <script>
+        // Ensure the DOM is fully loaded before running the script
+        document.addEventListener('DOMContentLoaded', () => {
+            // Get references to HTML elements
+            const video = document.getElementById('videoPlayer');
+            const messageBox = document.getElementById('messageBox');
+            const fetchAndPlayButton = document.getElementById('fetchAndPlayButton');
+            const buttonSpinner = document.getElementById('buttonSpinner');
+            const buttonText = document.getElementById('buttonText');
+            const vimeoVideoIdInput = document.getElementById('vimeoVideoId');
+            const vimeoApiTokenInput = document.getElementById('vimeoApiToken');
+
+            // Counter for consecutive fatal HLS.js errors
+            let fatalErrorCount = 0; 
+            // Stores the current HLS.js instance to manage its lifecycle
+            let currentHlsInstance = null; 
+
+            /**
+             * Displays a message in the message box.
+             * @param {string} message - The message content.
+             * @param {boolean} isError - True if it's an error message, false for success/info.
+             */
+            function showMessage(message, isError = false) {
+                messageBox.textContent = message;
+                // Remove previous styling classes to apply new ones
+                messageBox.classList.remove('hidden', 'bg-red-200', 'text-red-700', 'bg-green-200', 'text-green-700'); 
+                if (isError) {
+                    // Apply Tailwind classes for error messages
+                    messageBox.classList.add('bg-red-200', 'text-red-700'); 
+                } else {
+                    // Apply Tailwind classes for success/info messages
+                    messageBox.classList.add('bg-green-200', 'text-green-700'); 
+                }
+                // Make the message box visible
+                messageBox.classList.remove('hidden');
+            }
+
+            /**
+             * Hides the message box and clears its content.
+             */
+            function hideMessage() {
+                messageBox.classList.add('hidden');
+                messageBox.textContent = '';
+            }
+
+            /**
+             * Controls the visibility of the loading spinner and button text/state.
+             * @param {boolean} isLoading - True to show spinner and disable button, false to hide and enable.
+             */
+            function setLoading(isLoading) {
+                if (isLoading) {
+                    buttonSpinner.classList.remove('hidden'); // Show spinner
+                    buttonText.textContent = 'Loading...';    // Change button text
+                    fetchAndPlayButton.disabled = true;       // Disable button
+                } else {
+                    buttonSpinner.classList.add('hidden');    // Hide spinner
+                    buttonText.textContent = 'Fetch & Play Video'; // Restore button text
+                    fetchAndPlayButton.disabled = false;      // Enable button
+                }
+            }
+
+            // Event listener for the "Fetch & Play Video" button click
+            fetchAndPlayButton.addEventListener('click', async () => {
+                hideMessage();   // Clear any previous messages
+                setLoading(true); // Show loading state
+
+                // Pause and clear the video player before loading a new video
+                video.pause(); 
+                video.removeAttribute('src'); 
+
+                // Destroy any active HLS.js instance to prevent conflicts and memory leaks
+                if (currentHlsInstance) {
+                    currentHlsInstance.destroy();
+                    currentHlsInstance = null; // Clear the reference
+                }
+
+                // Get Vimeo Video ID and API Token from input fields
+                const videoId = vimeoVideoIdInput.value.trim();
+                const apiToken = vimeoApiTokenInput.value.trim();
+
+                // Validate input fields
+                if (!videoId) {
+                    showMessage('Please enter a Vimeo Video ID.', true);
+                    setLoading(false); // Hide loading state
+                    return; // Exit function
+                }
+                if (!apiToken) {
+                    showMessage('Please enter your Vimeo API Token.', true);
+                    setLoading(false); // Hide loading state
+                    return; // Exit function
+                }
+
+                showMessage('Fetching video URL...', false); // Inform user of ongoing process
+                fatalErrorCount = 0; // Reset fatal error count for a new attempt
+
+                try {
+                    // Construct the Vimeo API URL for the specified video
+                    const apiUrl = `https://api.vimeo.com/videos/${videoId}`;
+                    // Make the API call to Vimeo with the provided token
+                    const response = await fetch(apiUrl, {
+                        method: 'GET',
+                        headers: {
+                            'Authorization': `Bearer ${apiToken}`, // Use Bearer token for authentication
+                            'Content-Type': 'application/json'      // Specify content type
+                        }
+                    });
+
+                    // Check if the API response was successful (status code 200-299)
+                    if (!response.ok) {
+                        const errorData = await response.json(); // Parse error response
+                        console.error('Vimeo API Error:', errorData); // Log detailed error
+                        showMessage(`Error fetching video: ${errorData.error || response.statusText}. Please check the video ID and your API token.`, true);
+                        setLoading(false); // Hide loading state
+                        return; // Exit function
+                    }
+
+                    const data = await response.json(); // Parse successful response
+                    const hlsUrl = data?.play?.hls?.link; // Extract the HLS URL from the response
+
+                    if (hlsUrl) {
+                        loadAndPlayHls(hlsUrl); // Proceed to load and play the HLS stream
+                    } else {
+                        // Handle case where HLS URL is not found in the response
+                        showMessage('HLS URL not found for this video. It might not be available or requires specific permissions.', true);
+                        console.error('HLS URL not found in Vimeo response:', data);
+                        setLoading(false); // Hide loading state
+                    }
+                } catch (error) {
+                    // Handle network errors or other exceptions during the API call
+                    console.error('Failed to fetch video details from Vimeo API:', error);
+                    showMessage('Failed to connect to Vimeo API. Please check your network connection and token.', true);
+                    setLoading(false); // Hide loading state
+                }
+            });
+
+            /**
+             * Loads and plays an HLS video stream using HLS.js or native browser support.
+             * @param {string} url - The HLS manifest URL.
+             */
+            function loadAndPlayHls(url) {
+                // Check if HLS.js is supported by the browser
+                if (Hls.isSupported()) {
+                    // Create a new HLS.js instance
+                    currentHlsInstance = new Hls(); 
+                    
+                    // Load the HLS manifest source
+                    currentHlsInstance.loadSource(url);
+                    // Attach the HLS.js instance to the video element
+                    currentHlsInstance.attachMedia(video);
+
+                    // Event listener for when the HLS manifest is parsed successfully
+                    currentHlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
+                        video.play(); // Start video playback
+                        showMessage('Video loaded and playing!', false); // Display success message
+                        setLoading(false); // Hide loading state
+                        fatalErrorCount = 0; // Reset error count on successful playback
+                    });
+
+                    // Event listener for HLS.js errors
+                    currentHlsInstance.on(Hls.Events.ERROR, function (event, data) {
+                        console.error('HLS.js Error:', data); // Log the full error data for debugging
+
+                        // Check if the error is fatal
+                        if (data.fatal) {
+                            fatalErrorCount++; // Increment fatal error counter
+                            // If too many fatal errors occur, stop trying to recover
+                            if (fatalErrorCount >= 3) { 
+                                showMessage(`Multiple fatal HLS errors encountered (${data.details}). Video playback stopped. This often indicates an expired or restricted stream URL, or a CORS issue from Vimeo's CDN. A backend proxy is generally required for reliable Vimeo HLS playback.`, true);
+                                currentHlsInstance.destroy(); // Destroy the HLS instance
+                                setLoading(false); // Hide loading state
+                                return; // Stop further error processing
+                            }
+
+                            // Handle different types of fatal errors with recovery attempts
+                            switch(data.type) {
+                                case Hls.ErrorTypes.NETWORK_ERROR:
+                                    console.warn('Fatal network error encountered, trying to recover:', data);
+                                    showMessage('Network error during playback. Trying to recover...', true);
+                                    currentHlsInstance.startLoad(); // Attempt to restart loading
+                                    break;
+                                case Hls.ErrorTypes.MEDIA_ERROR:
+                                    console.warn('Fatal media error encountered, trying to recover:', data);
+                                    showMessage('Media error during playback (e.g., buffer append error). This often indicates an expired or invalid stream segment. Trying to recover...', true);
+                                    currentHlsInstance.recoverMediaError(); // Attempt to recover from media error
+                                    break;
+                                default:
+                                    console.warn('Cannot recover from fatal HLS error:', data);
+                                    showMessage(`A fatal HLS error occurred: ${data.details}. Attempting recovery...`, true);
+                                    // For other unhandled fatal errors, destroy and indicate failure
+                                    currentHlsInstance.destroy(); 
+                                    setLoading(false); 
+                                    break;
+                            }
+                        } else {
+                            console.warn('Non-fatal HLS error:', data); // Log non-fatal errors
+                        }
+                    });
+                } 
+                // Fallback for browsers that support native HLS playback (e.g., Safari on iOS/macOS)
+                else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    video.src = url; // Set the video source directly
+                    video.addEventListener('loadedmetadata', function() {
+                        video.play(); // Start playback when metadata is loaded
+                        showMessage('Video loaded and playing (Native HLS)!', false);
+                        setLoading(false);
+                    }, { once: true }); // Ensure this listener runs only once
+                    video.addEventListener('error', (e) => {
+                        console.error('Native video error:', e); // Log native video errors
+                        showMessage('Error playing video natively. The video format might not be supported or stream is invalid.', true);
+                        setLoading(false);
+                    }, { once: true }); // Ensure this listener runs only once
+                    video.load(); // Explicitly tell the video element to load the source
+                } 
+                // If neither HLS.js nor native HLS is supported
+                else {
+                    showMessage('Your browser does not support HLS playback.', true);
+                    console.error('Your browser does not support HLS playback.');
+                    setLoading(false);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
