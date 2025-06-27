@@ -1,0 +1,43 @@
+@startuml
+skinparam style strict
+
+participant "HTML Page\n(Browser)" as Frontend
+participant "Backend" as Backend
+participant "Vimeo API" as VimeoAPI
+database "CDN" as VimeoCDN
+
+Frontend -> Frontend : Triggers Video Load and Play
+activate Frontend
+note left: Playback initiated (e.g., via button click or auto-play).
+
+Frontend -> Backend : Request HLS Playback URL (with Video ID)
+activate Backend
+note left: Frontend sends video ID to backend for HLS URL retrieval.
+
+Backend -> VimeoAPI : Authenticate & Request HLS URL (with Video ID)
+activate VimeoAPI
+note right: Backend uses secure server-side API token to fetch dynamic HLS URL.
+
+VimeoAPI --> Backend : Respond with Ephemeral HLS URL
+deactivate VimeoAPI
+
+Backend --> Frontend : Provide Ephemeral HLS URL
+deactivate Backend
+
+Frontend -> Frontend : Initialises HLS.js library with received URL
+Frontend -> VimeoCDN : HLS.js requests HLS Manifest (.m3u8)
+activate VimeoCDN
+note right: Player sends HTTP GET request for the manifest.
+
+VimeoCDN --> Frontend : Serves HLS Manifest
+VimeoCDN -> Frontend : HLS.js requests Video Segments
+note right: Player requests video chunks based on manifest.
+
+VimeoCDN --> Frontend : Serves Video Segments
+deactivate VimeoCDN
+
+Frontend -> Frontend : HLS.js decodes and plays video
+Frontend -> Frontend : Displays "Video loaded and playing!" message
+deactivate Frontend
+
+@enduml
